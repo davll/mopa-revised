@@ -36,7 +36,7 @@
 //!
 //!    ```rust
 //!    #[macro_use]
-//!    extern crate mopa;
+//!    extern crate mopa_revised as mopa;
 //!    # fn main() { }
 //!    ```
 //!
@@ -52,7 +52,7 @@
 //!
 //! ```rust
 //! #[macro_use]
-//! extern crate mopa;
+//! extern crate mopa_revised as mopa;
 //!
 //! struct Bear {
 //!     // This might be a pretty fat bear.
@@ -195,7 +195,7 @@ impl<T: core::any::Any> Any for T {
 /// 1. If you are a **normal person**:
 ///
 ///    ```rust
-///    # #[macro_use] extern crate mopa;
+///    # #[macro_use] extern crate mopa_revised as mopa;
 ///    trait Trait: mopa::Any { }
 ///    mopafy!(Trait);
 ///    # fn main() { }
@@ -204,7 +204,7 @@ impl<T: core::any::Any> Any for T {
 /// 2. If you are using **libcore** but not libstd (`#![no_std]`) or liballoc, write this:
 ///
 ///    ```rust
-///    # #[macro_use] extern crate mopa;
+///    # #[macro_use] extern crate mopa_revised as mopa;
 ///    # trait Trait: mopa::Any { }
 ///    mopafy!(Trait, only core);
 ///    # fn main() { }
@@ -220,7 +220,7 @@ impl<T: core::any::Any> Any for T {
 ///    # // This doctest is ignored so that it doesn't break tests on the stable/beta rustc
 ///    # // channels where #[feature] isn’t allowed.
 ///    # #![feature(alloc)]
-///    # #[macro_use] extern crate mopa;
+///    # #[macro_use] extern crate mopa_revised as mopa;
 ///    # extern crate alloc;
 ///    # trait Trait: mopa::Any { }
 ///    use alloc::boxed::Box;
@@ -234,8 +234,15 @@ macro_rules! mopafy {
     // If you’re not using libstd, you’ll need to `use alloc::boxed::Box;`, or forego the
     // `Box<Any>` methods by just using `mopafy!(Trait, only core);`.
     ($trait_:ident) => {
-        mopafy!($trait_, only core);
+        mopafy!($trait_, core);
+        mopafy!($trait_, boxed);
+    };
 
+    ($trait_:ident, only core) => {
+        mopafy!($trait_, core);
+    };
+
+    ($trait_:ident, boxed) => {
         #[allow(dead_code)]
         impl $trait_ {
             /// Returns the boxed value if it is of type `T`, or `Err(Self)` if it isn't.
@@ -261,7 +268,7 @@ macro_rules! mopafy {
 
     // Not using libstd/liballoc? The core functionality can do without them; you will still have
     // the `&Any` and `&mut Any` methods but will lose the `Box<Any>` methods.
-    ($trait_:ident, only core) => {
+    ($trait_:ident, core) => {
         #[allow(dead_code)]
         impl $trait_ {
             /// Returns true if the boxed type is the same as `T`

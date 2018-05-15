@@ -13,7 +13,7 @@ fn main() { }
 
 #[cfg(feature = "no_std_examples")]
 #[macro_use]
-extern crate mopa;
+extern crate mopa_revised as mopa;
 
 #[cfg(feature = "no_std_examples")]
 extern crate libc;

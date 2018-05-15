@@ -1,5 +1,5 @@
 #[macro_use]
-extern crate mopa;
+extern crate mopa_revised as mopa;
 
 use mopa::Any;
 
