@@ -42,101 +42,21 @@
 //!
 //! 2. Make `Any` (`mopa::Any`, not `std::any::Any`) a supertrait of `Person`;
 //!
-//! 3. `mopafy!(Person);`.
+//! 3. Call `mopafy!` macro family to generate methods:
 //!
-//! And lo, you can now write `person.is::<Benny>()` and `person.downcast_ref::<Benny>()` and so on
-//! to your heart’s content. Simple, huh?
+//!    ```rust,ignore
+//!    // add methods for &Person, &mut Person
+//!    mopafy!(Person, core);
+//!    // add methods for Box<Person>
+//!    mopafy!(Person, boxed);
+//!    // add methods for Arc<Person>
+//!    mopafy!(Person, arc);
+//!    ```
 //!
-//! Oh, by the way, it was actually the person on the bear’s plate. There wasn’t really anything on
-//! `Person`’s plate after all.
-//!
-//! ```rust
-//! #[macro_use]
-//! extern crate mopa_revised as mopa;
-//!
-//! struct Bear {
-//!     // This might be a pretty fat bear.
-//!     fatness: u16,
-//! }
-//!
-//! impl Bear {
-//!     fn eat(&mut self, person: Box<Person>) {
-//!         self.fatness = (self.fatness as i16 + person.weight()) as u16;
-//!     }
-//! }
-//!
-//! trait Person: mopa::Any {
-//!     fn panic(&self);
-//!     fn yell(&self) { println!("Argh!"); }
-//!     fn sleep(&self);
-//!     fn weight(&self) -> i16;
-//! }
-//!
-//! mopafy!(Person);
-//!
-//! struct Benny {
-//!     // (Benny is not a superhero. He can’t carry more than 256kg of food at once.)
-//!     kilograms_of_food: u8,
-//! }
-//!
-//! impl Person for Benny {
-//!     fn panic(&self) { self.yell() }
-//!     fn sleep(&self) { /* ... */ }
-//!     fn weight(&self) -> i16 {
-//!         // Who’s trying to find out? I’m scared!
-//!         self.yell();
-//!         self.kilograms_of_food as i16 + 60
-//!     }
-//! }
-//!
-//! struct Chris;
-//!
-//! impl Chris {
-//!     // Normal people wouldn’t be brave enough to hit a bear but Chris might.
-//!     fn hit(&self, bear: &mut Bear) {
-//!         println!("Chris hits the bear! How brave! (Or maybe stupid?)");
-//!         // Meh, boundary conditions, what use are they in examples?
-//!         // Chris clearly hits quite hard. Poor bear.
-//!         bear.fatness -= 1;
-//!     }
-//! }
-//!
-//! impl Person for Chris {
-//!     fn panic(&self) { /* ... */ }
-//!     fn sleep(&self) { /* ... */ }
-//!     fn weight(&self) -> i16 { -5 /* antigravity device! cool! */ }
-//! }
-//!
-//! fn simulate_simulation(person: Box<Person>, bear: &mut Bear) {
-//!     if person.is::<Benny>() {
-//!         // None of the others do, but Benny knows this particular
-//!         // bear by reputation and he’s *really* going to be worried.
-//!         person.yell()
-//!     }
-//!     // If it happens to be Chris, he’ll hit the bear.
-//!     person.downcast_ref::<Chris>().map(|chris| chris.hit(bear));
-//!     bear.eat(person);
-//! }
-//!
-//! fn main() {
-//!     let mut bear = Bear { fatness: 10 };
-//!     simulate_simulation(Box::new(Benny { kilograms_of_food: 5 }), &mut bear);
-//!     simulate_simulation(Box::new(Chris), &mut bear);
-//! }
-//! ```
-//!
-//! Now *should* you do something like this? Probably not. Enums are probably a better solution for
-//! this particular case as written; frankly I believe that almost the only time you should
-//! downcast an `Any` trait object (or a mopafied trait object) is with a generic parameter, when
-//! producing something like `AnyMap`, for example. If you control *all* the code, `Any` trait
-//! objects are probably not the right solution; they’re good for cases with user-defined
-//! types across a variety of libraries. But the question of purpose and suitability is open, and I
-//! don’t have a really good example of such a use case here at present. TODO.
 
 #![no_std]
 
-#[cfg(test)]
-#[macro_use]
+#[cfg(any(test, doc, feature = "std"))]
 extern crate std;
 
 /// Implementation details of the `mopafy!` macro.
@@ -148,6 +68,9 @@ pub mod __ {
     // often.)
     pub use core::option::Option;
     pub use core::result::Result;
+
+    #[cfg(feature = "std")]
+    pub use std::sync::Arc;
 }
 
 /// A type to emulate dynamic typing.
@@ -229,28 +152,27 @@ impl<T: core::any::Any> Any for T {
 ///    ```
 #[macro_export]
 macro_rules! mopafy {
-    // Implement the full suite of `Any` methods: those of `&Any`, `&mut Any` and `Box<Any>`.
-    //
-    // If you’re not using libstd, you’ll need to `use alloc::boxed::Box;`, or forego the
-    // `Box<Any>` methods by just using `mopafy!(Trait, only core);`.
+    // deprecated
     ($trait_:ident) => {
         mopafy!($trait_, core);
         mopafy!($trait_, boxed);
     };
 
+    // deprecated
     ($trait_:ident, only core) => {
         mopafy!($trait_, core);
     };
 
+    // Implement methods for `Box<Any>`
     ($trait_:ident, boxed) => {
         #[allow(dead_code)]
         impl $trait_ {
             /// Returns the boxed value if it is of type `T`, or `Err(Self)` if it isn't.
             #[inline]
-            pub fn downcast<T: $trait_>(self: Box<Self>) -> $crate::__::Result<Box<T>, Box<Self>> {
+            pub fn downcast_box<T: $trait_>(self: Box<Self>) -> $crate::__::Result<Box<T>, Box<Self>> {
                 if self.is::<T>() {
                     unsafe {
-                        $crate::__::Result::Ok(self.downcast_unchecked())
+                        $crate::__::Result::Ok(self.downcast_box_unchecked())
                     }
                 } else {
                     $crate::__::Result::Err(self)
@@ -260,14 +182,35 @@ macro_rules! mopafy {
             /// Returns the boxed value, blindly assuming it to be of type `T`.
             /// If you are not *absolutely certain* of `T`, you *must not* call this.
             #[inline]
-            pub unsafe fn downcast_unchecked<T: $trait_>(self: Box<Self>) -> Box<T> {
+            pub unsafe fn downcast_box_unchecked<T: $trait_>(self: Box<Self>) -> Box<T> {
                 Box::from_raw(Box::into_raw(self) as *mut T)
             }
         }
     };
 
-    // Not using libstd/liballoc? The core functionality can do without them; you will still have
-    // the `&Any` and `&mut Any` methods but will lose the `Box<Any>` methods.
+    // Implement methods for `Arc<Any>`
+    ($trait_:ident, arc) => {
+        #[allow(dead_code)]
+        impl $trait_ {
+            #[inline]
+            pub fn downcast_arc<T: $trait_>(this: $crate::__::Arc<Self>) -> $crate::__::Result<$crate::__::Arc<T>, $crate::__::Arc<Self>> {
+                if this.is::<T>() {
+                    unsafe {
+                        $crate::__::Result::Ok($trait_::downcast_arc_unchecked(this))
+                    }
+                } else {
+                    $crate::__::Result::Err(this)
+                }
+            }
+
+            #[inline]
+            pub unsafe fn downcast_arc_unchecked<T: $trait_>(this: $crate::__::Arc<Self>) -> $crate::__::Arc<T> {
+                $crate::__::Arc::from_raw($crate::__::Arc::into_raw(this) as *mut T)
+            }
+        }
+    };
+
+    // Implement methods for `&Any` and `&mut Any`
     ($trait_:ident, core) => {
         #[allow(dead_code)]
         impl $trait_ {
@@ -320,6 +263,19 @@ macro_rules! mopafy {
     };
 }
 
+#[cfg(doc)]
+mod example {
+    use std::prelude::v1::*;
+
+    trait Person: super::Any {
+        fn weight(&self) -> i16;
+    }
+
+    mopafy!(Person, core);
+    mopafy!(Person, boxed);
+    mopafy!(Person, arc);
+}
+
 #[cfg(test)]
 mod tests {
     use std::prelude::v1::*;
@@ -328,7 +284,9 @@ mod tests {
         fn weight(&self) -> i16;
     }
 
-    mopafy!(Person);
+    mopafy!(Person, core);
+    mopafy!(Person, boxed);
+    mopafy!(Person, arc);
 
     #[derive(Clone, Debug, PartialEq)]
     struct Benny {
@@ -386,17 +344,40 @@ mod tests {
         assert!(person.is::<Benny>());
         assert_eq!(person.downcast_ref::<Benny>(), Some(&benny));
         assert_eq!(person.downcast_mut::<Benny>(), Some(&mut benny));
-        assert_eq!(person.downcast::<Benny>().map(|x| *x).ok(), Some(benny.clone()));
+        assert_eq!(person.downcast_box::<Benny>().map(|x| *x).ok(), Some(benny.clone()));
 
         person = Box::new(benny.clone());
         assert_eq!(unsafe { person.downcast_ref_unchecked::<Benny>() }, &benny);
         assert_eq!(unsafe { person.downcast_mut_unchecked::<Benny>() }, &mut benny);
-        assert_eq!(unsafe { *person.downcast_unchecked::<Benny>() }, benny);
+        assert_eq!(unsafe { *person.downcast_box_unchecked::<Benny>() }, benny);
 
         person = Box::new(benny.clone());
         assert!(!person.is::<Chris>());
         assert_eq!(person.downcast_ref::<Chris>(), None);
         assert_eq!(person.downcast_mut::<Chris>(), None);
-        assert!(person.downcast::<Chris>().err().is_some());
+        assert!(person.downcast_box::<Chris>().err().is_some());
+    }
+
+    #[test]
+    fn test_arc() {
+        use std::sync::Arc;
+
+        let benny = Benny { kilograms_of_food: 13 };
+        let person: Arc<Person> = Arc::new(benny.clone());
+        let person1 = person.clone();
+        let person2 = person.clone();
+        assert!(person.is::<Benny>());
+        assert!(person1.is::<Benny>());
+        assert!(person2.is::<Benny>());
+        assert_eq!(Arc::strong_count(&person), 3);
+        assert_eq!(person.downcast_ref::<Benny>(), Some(&benny));
+        {
+            let b2 = Person::downcast_arc::<Benny>(person).ok().unwrap();
+            assert_eq!(b2.as_ref(), &benny);
+            assert_eq!(Arc::strong_count(&b2), 3);
+        }
+        assert_eq!(Arc::strong_count(&person1), 2);
+        assert_eq!(person1.downcast_ref::<Benny>(), Some(&benny));
+        assert_eq!(person2.downcast_ref::<Benny>(), Some(&benny));
     }
 }
